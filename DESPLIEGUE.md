@@ -13,6 +13,8 @@ Este documento recopila todas las evidencias y respuestas de la practica.
 - Comando:
 - Evidencia:
 
+![Captura de despliegue](evidencias/Captura%20de%20pantalla%202026-01-13%20232312.png)
+
 2) Configuracion cargada
 - Que demuestra:
 - Comando:
