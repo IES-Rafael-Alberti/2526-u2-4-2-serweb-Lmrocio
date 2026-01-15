@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  # Servicio Web - Nginx
+  nginx:
+    image: nginx:latest
+    container_name: nginx-web
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./web:/usr/share/nginx/html
+      - ./config/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certificados/nginx-selfsigned.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
+      - ./certificados/nginx-selfsigned.key:/etc/ssl/private/nginx-selfsigned.key:ro
+    restart: unless-stopped
+    networks:
+      - red-practica
+
+  # Servicio SFTP
+  sftp:
+    image: atmoz/sftp:latest
+    container_name: sftp-server
+    ports:
+      - "2222:22"
+    volumes:
+      - ./web:/home/usuario/upload
+    command: usuario:password:1001:1001:upload
+    restart: unless-stopped
+    networks:
+      - red-practica
+
+networks:
+  red-practica:
+    driver: bridge
