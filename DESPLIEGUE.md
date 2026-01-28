@@ -151,56 +151,302 @@ return 301 https://$host:8443$request_uri;
 ## Parte 2 — Evaluacion RA2 (a–j)
 
 ### a) Parametros de administracion
-- Respuesta:
-- Evidencias:
-  - evidencias/a-01-grep-nginxconf.png
-  - evidencias/a-02-nginx-t.png
-  - evidencias/a-03-reload.png
+#### Respuesta:
+
+``bash
+docker exec -it nginx-web sh -c "grep -nE 'worker_processes|worker_connections|access_log|error_log|gzip|include|keepalive_timeout' /etc/nginx/nginx.conf"
+``
+
+**Directivas principales de Nginx**:
+
+- ``worker_processes``: Controla el número de procesos trabajadores de Nginx. Valor típico: ``auto`` (detecta núcleos CPU). Configuración incorrecta: poner ``worker_processes 100`` en un servidor con 2 CPUs sobrecarga el sistema y degrada el rendimiento.
+
+- ``worker_connections``: Define cuántas conexiones simultáneas puede manejar cada worker. Valor típico: ``1024`` o ``2048``. Configuración incorrecta: ``worker_connections 10`` limitaría drásticamente la capacidad del servidor, rechazando conexiones legítimas.
+
+- ``access_log``: Ruta donde se registran todas las peticiones HTTP. Configuración incorrecta: usar ``access_log /ruta/inexistente/access.log`` impide el registro de peticiones y dificulta la depuración.
+
+- ``error_log``: Ruta para errores del servidor. Configuración incorrecta: establecer ``error_log off`` elimina información crucial para diagnosticar problemas.
+
+- ``keepalive_timeout``: Tiempo que una conexión permanece abierta esperando nuevas peticiones. Valor típico: ``65`` segundos. Configuración incorrecta: ``keepalive_timeout 300`` mantiene conexiones abiertas innecesariamente, agotando recursos del servidor.
+
+- ``include``: Permite incluir archivos de configuración externos. Configuración incorrecta: ``include /etc/nginx/conf.d/*.txt`` no cargará los archivos .conf necesarios.
+
+- ``gzip``: Activa la compresión de respuestas. Aunque esté comentado por defecto, es fundamental para optimizar transferencias.
+
+
+**Cambio aplicado**:
+He ajustado el ``keepalive_timeout`` a ``30`` en el archivo ``default.conf`` para optimizar la liberación de recursos.
+
+```bash
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name localhost rocio-app;
+
+    # Evita redirecciones absolutas que pierden el puerto en Docker
+    absolute_redirect off;
+
+    # ===== APARTADO A: Modificación de parámetro de administración =====
+    # Ajuste de keepalive_timeout para optimizar liberación de recursos
+    # Valor por defecto global: 65s
+    # Valor ajustado para este servidor: 30s
+    keepalive_timeout 30;
+
+    [... resto de la configuración ...]
+}
+
+# Reinicio servicios
+docker compose down
+docker compose up -d
+
+# Valido configuración
+docker exec -it nginx-web nginx -t
+
+# Recargo Nginx
+docker exec -it nginx-web nginx -s reload
+```
+
+#### Evidencias:
+![a-01-grep-nginxconf.png](evidencias/a-01-grep-nginxconf.png)
+![a-02-nginx-t.png](evidencias/a-02-nginx-t.png)
+![a-03-reload.png](evidencias/a-03-reload.png)
+
+
 
 ### b) Ampliacion de funcionalidad + modulo investigado
-- Opcion elegida (B1 o B2):
-- Respuesta:
-- Evidencias (B1 o B2):
-  - evidencias/b1-01-gzipconf.png
-  - evidencias/b1-02-compose-volume-gzip.png
-  - evidencias/b1-03-nginx-t.png
-  - evidencias/b1-04-curl-gzip.png
-  - evidencias/b2-01-defaultconf-headers.png
-  - evidencias/b2-02-nginx-t.png
-  - evidencias/b2-03-curl-https-headers.png
+#### Opcion elegida: Opción B1: Gzip
+
+#### Respuesta:
+
+````bash
+# Creo archivo gzip.conf
+
+cat > config/gzip.conf << 'EOF'
+
+# Activar compresión gzip
+
+gzip on;
+
+# Tipos MIME a comprimir
+gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+# Nivel de compresión (1-9, 5 es equilibrado)
+gzip_comp_level 5;
+
+# Añadir cabecera Vary: Accept-Encoding
+gzip_vary on;
+
+# Tamaño mínimo para comprimir (en bytes)
+gzip_min_length 256;
+EOF
+
+# Añado montaje en docker-compose.yml
+# Añado esta línea en volumes del servicio nginx-web:
+# - ./config/gzip.conf:/etc/nginx/conf.d/gzip.conf:ro
+
+# Reinicio servicios
+docker compose down
+docker compose up -d
+
+# Valido configuración
+docker exec -it nginx-web nginx -t
+
+# Pruebo compresión gzip
+curl -I -H "Accept-Encoding: gzip" http://localhost:8080/
+curl -I -k -H "Accept-Encoding: gzip" https://localhost:8443/
+````
+
+**Explicación configuración**:
+
+He activado la compresión gzip en Nginx para reducir el tamaño de las respuestas HTTP y mejorar el rendimiento de la aplicación. La configuración incluye:
+
+- ``gzip on``: Activa la compresión
+
+- ``gzip_types``: Lista de tipos MIME que se comprimirán (HTML, CSS, JS, JSON, XML)
+
+- ``gzip_comp_level 5``: Nivel de compresión equilibrado entre CPU y ratio de compresión
+
+- ``gzip_vary on``: Añade cabecera Vary para que proxies intermedios cacheen correctamente
+
+- ``gzip_min_length 256``: Solo comprime archivos mayores de 256 bytes
+
+La compresión puede reducir el tamaño de las respuestas hasta un 70-90%, mejorando significativamente la velocidad de carga.
+
+#### Evidencias:
+
+![b1-01-gzipconf.png](evidencias/b1-01-gzipconf.png)
+
+![b1-02-compose-volume-gzip.png](evidencias/b1-02-compose-volume-gzip.png)
+
+![b1-03-nginx-t.png](evidencias/b1-03-nginx-t.png)
+
+![b1-04-curl-gzip.png](evidencias/b1-04-curl-gzip.png)
+
 
 #### Modulo investigado: <NOMBRE>
-- Para que sirve:
+- Para que sirve: Este módulo proporciona una página con estadísticas básicas del servidor en tiempo real, incluyendo conexiones activas, peticiones totales, conexiones aceptadas/manejadas y estado de lectura/escritura. Es útil para monitorización básica sin herramientas externas.
 - Como se instala/carga:
+  - En la mayoría de distribuciones de Nginx, este módulo viene compilado por defecto
+  - Para verificar si está disponible: nginx -V 2>&1 | grep -o with-http_stub_status_module
+  - Se activa mediante configuración, añadiendo un location:
+
+```nginx
+location /nginx_status {
+    stub_status on;
+    access_log off;
+    allow 127.0.0.1;
+    deny all;
+}
+```
+
 - Fuente(s):
+  - Documentación oficial: https://nginx.org/en/docs/http/ngx_http_stub_status_module.html
+  - Guía de uso: https://www.nginx.com/blog/monitoring-nginx/
+
 
 ### c) Sitios virtuales / multi-sitio
-- Respuesta:
-- Evidencias:
-  - evidencias/c-01-root.png
-  - evidencias/c-02-reloj.png
-  - evidencias/c-03-defaultconf-inside.png
+#### Respuesta:
+
+````bash
+docker exec -it nginx-web cat /etc/nginx/conf.d/default.conf
+````
+
+**Multi-sitio por path vs por nombre**:
+
+- Multi-sitio por path: Utiliza el mismo dominio pero diferentes rutas (ej: ``example.com/`` y ``example.com/reloj``). Todas las aplicaciones comparten el mismo ``server_name`` y puerto, diferenciándose mediante directivas ``location``. Es ideal para aplicaciones relacionadas o submódulos de un mismo proyecto.
+
+- Multi-sitio por nombre: Utiliza diferentes dominios (ej: ``app1.com`` y ``app2.com``) apuntando a la misma IP. Nginx diferencia las peticiones mediante la directiva ``server_name`` en bloques ``server`` separados. Permite aislar completamente diferentes proyectos.
+
+**Tipos adicionales de multi-sitio**:
+
+- Multi-sitio por puerto: Diferentes aplicaciones escuchan en puertos distintos (ej: puerto 80 para web pública, puerto 8080 para panel admin). Se configuran múltiples bloques ``server`` con diferentes ``listen``.
+
+- Multi-sitio por IP: El servidor tiene múltiples IPs asignadas y cada aplicación se vincula a una IP específica mediante ``listen IP:puerto``. Útil en servidores con múltiples interfaces de red.
+
+- Multi-sitio por subdominios: Similar al multi-sitio por nombre, pero usando subdominios del mismo dominio principal (ej: ``blog.example.com``, ``shop.example.com``). Se configura con ``server_name`` usando comodines o nombres específicos.
+
+**Configuración actual (multi-sitio por path)**:
+
+Mi ``default.conf`` implementa multi-sitio por path con las siguientes directivas clave:
+
+- root: Define el directorio raíz ```/usr/share/nginx/html``` para el sitio principal
+
+- location /: Sirve el contenido principal con ``try_files $uri $uri/ =404``
+
+- location /reloj/: Directiva específica para la aplicación del reloj, con ``alias /usr/share/nginx/html/reloj/`` que mapea la ruta URL a un directorio físico específico
+
+- absolute_redirect off: Evita redirecciones absolutas que perderían el puerto 8080
+
+#### Evidencias:
+
+![c-01-root.png](evidencias/c-01-root.png)
+
+![c-02-reloj.png](evidencias/c-02-reloj.png)
+
+![c-03-defaultconf-inside.png](evidencias/c-03-defaultconf-inside.png)
 
 ### d) Autenticacion y control de acceso
-- Respuesta:
-- Evidencias:
-  - evidencias/d-01-admin-html.png
-  - evidencias/d-02-defaultconf-auth.png
-  - evidencias/d-03-curl-401.png
-  - evidencias/d-04-curl-200.png
+
+#### Respuesta:
+
+````bash
+# Creo directorio y contenido para /admin
+mkdir -p web/admin
+cat > web/admin/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .panel {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        h1 { color: #667eea; }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <h1>Panel de Administración</h1>
+        <p>Acceso restringido - Autenticación exitosa</p>
+    </div>
+</body>
+</html>
+EOF
+
+# Genero archivo .htpasswd con usuario y contraseña
+# Usuario: admin, Contraseña: Admin1234!
+docker exec -it nginx-web sh -c "apt-get update && apt-get install -y apache2-utils"
+docker exec -it nginx-web htpasswd -bc /etc/nginx/.htpasswd admin 'Admin1234!'
+
+#  Modifico default.c onf añadiendo dentro del server block de HTTPS:
+cat >> config/default.conf << 'EOF'
+
+    # Protección para /admin/
+    location /admin/ {
+        auth_basic "Área Restringida";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+    }
+EOF
+
+# Valido y recargo
+docker exec -it nginx-web nginx -t
+docker exec -it nginx-web nginx -s reload
+
+# Pruebo sin credenciales (debe dar 401)
+curl -I -k https://localhost:8443/admin/
+
+# Pruebo con credenciales (debe dar 200)
+curl -I -k -u admin:'Admin1234!' https://localhost:8443/admin/
+````
+#### Evidencias:
+
+![](evidencias/d-01-admin-html.png)
+
+![](evidencias/d-02-defaultconf-auth.png)
+
+![](evidencias/d-03-curl-401.png)
+
+![](evidencias/d-04-curl-200.png)
+
 
 ### e) Certificados digitales
-- Respuesta:
-- Evidencias:
-  - evidencias/e-01-ls-certs.png
-  - evidencias/e-02-compose-certs.png
-  - evidencias/e-03-defaultconf-ssl.png
+
+#### Respuesta:
+
+#### Evidencias:
+
+![](evidencias/e-01-ls-certs.png)
+
+![](evidencias/e-02-compose-certs.png)
+
+![](evidencias/e-03-defaultconf-ssl.png)
+
+
 
 ### f) Comunicaciones seguras
-- Respuesta:
-- Evidencias:
-  - evidencias/f-01-https.png
-  - evidencias/f-02-301-network.png
+
+#### Respuesta:
+#### Evidencias:
+
+![](evidencias/f-01-https.png)
+
+![](evidencias/f-02-301-network.png)
 
 ### g) Documentacion
 - Respuesta:
