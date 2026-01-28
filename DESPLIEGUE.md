@@ -153,9 +153,9 @@ return 301 https://$host:8443$request_uri;
 ### a) Parametros de administracion
 #### Respuesta:
 
-``bash
+````bash
 docker exec -it nginx-web sh -c "grep -nE 'worker_processes|worker_connections|access_log|error_log|gzip|include|keepalive_timeout' /etc/nginx/nginx.conf"
-``
+````
 
 **Directivas principales de Nginx**:
 
@@ -284,7 +284,7 @@ La compresión puede reducir el tamaño de las respuestas hasta un 70-90%, mejor
 ![b1-04-curl-gzip.png](evidencias/b1-04-curl-gzip.png)
 
 
-#### Modulo investigado: <NOMBRE>
+#### Modulo investigado: Módulo ngx_status
 - Para que sirve: Este módulo proporciona una página con estadísticas básicas del servidor en tiempo real, incluyendo conexiones activas, peticiones totales, conexiones aceptadas/manejadas y estado de lectura/escritura. Es útil para monitorización básica sin herramientas externas.
 - Como se instala/carga:
   - En la mayoría de distribuciones de Nginx, este módulo viene compilado por defecto
@@ -416,58 +416,247 @@ curl -I -k -u admin:'Admin1234!' https://localhost:8443/admin/
 ````
 #### Evidencias:
 
-![](evidencias/d-01-admin-html.png)
+![d-01-admin-html.png](evidencias/d-01-admin-html.png)
 
-![](evidencias/d-02-defaultconf-auth.png)
 
-![](evidencias/d-03-curl-401.png)
+![d-02-defaultconf-auth.png](evidencias/d-02-defaultconf-auth.png)
 
-![](evidencias/d-04-curl-200.png)
+
+![d-03-curl-401.png](evidencias/d-03-curl-401.png)
+
+
+![d-04-curl-200.png](evidencias/d-04-curl-200.png)
 
 
 ### e) Certificados digitales
 
 #### Respuesta:
 
+Para habilitar el cifrado SSL/TLS en el servidor, se han generado un certificado y una clave privada.
+
+**Explicación de archivos y parámetros**:
+
+- ```.crt``` (Certificate): Es el archivo que contiene la clave pública y la información de identidad del servidor, firmada (en este caso) por nosotros mismos. Se envía al cliente para establecer la confianza. 
+
+- ```.key``` (Private Key): Es la clave privada que debe permanecer únicamente en el servidor. Se utiliza para descifrar los datos enviados por los clientes.
+
+- ```-nodes``` (No DES): Este parámetro de OpenSSL se utiliza para que la clave privada no esté cifrada con una contraseña. En entornos de laboratorio y contenedores es fundamental, ya que de lo contrario Nginx se detendría al arrancar solicitando una clave de forma interactiva, lo cual no es posible en un proceso en segundo plano.
+
+**Configuración aplicada**:
+
+Se han montado los archivos mediante volúmenes en el contenedor y se han vinculado en el bloque server de HTTPS:
+
+```nginx
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/certs/nginx-selfsigned.key;
+```
+
 #### Evidencias:
 
-![](evidencias/e-01-ls-certs.png)
+![e-01-ls-certs.png](evidencias/e-01-ls-certs.png)
 
-![](evidencias/e-02-compose-certs.png)
+![e-02-compose-certs.png](evidencias/e-02-compose-certs.png)
 
-![](evidencias/e-03-defaultconf-ssl.png)
+![e-03-defaultconf-ssl.png](evidencias/e-03-defaultconf-ssl.png)
 
 
 
 ### f) Comunicaciones seguras
 
 #### Respuesta:
+
+La seguridad de la comunicación se garantiza forzando a todos los clientes a utilizar el protocolo HTTPS.
+
+**Arquitectura de bloques de servidor**:
+
+Se han configurado dos bloques ``server`` diferenciados por el puerto de escucha:
+
+1. Bloque Puerto 80: Su única función es recibir peticiones inseguras y devolver un código de estado ``301 Moved Permanently``. Esto redirige al navegador de forma automática hacia la versión segura.
+
+2. Bloque Puerto 443: Es el encargado de realizar el "handshake" SSL y servir el contenido cifrado.
+
+Esta separación es una buena práctica porque evita procesar lógica de aplicación en conexiones no seguras y garantiza que ningún dato (como las credenciales de ```/admin```) viaje en texto plano.
+
 #### Evidencias:
 
-![](evidencias/f-01-https.png)
+![f-01-https.png](evidencias/f-01-https.png)
 
-![](evidencias/f-02-301-network.png)
+![f-02-301-network.png](evidencias/f-02-301-network.png)
+
 
 ### g) Documentacion
-- Respuesta:
-- Evidencias: enlaces a todas las capturas
+
+#### Respuesta:
+
+Este documento ``DESPLIEGUE.md`` contiene la documentación completa de la práctica, organizada en:
+
+**Arquitectura del sistema**:
+- Servicios: Nginx (puertos 8080/8443) y SFTP (puerto 2222)
+- Volúmenes: webdata, config (default.conf, gzip.conf) y certificados SSL
+- Red: red-practica (bridge)
+
+**Configuración Nginx**:
+- Dos server blocks: puerto 80 (redirección 301 a HTTPS) y puerto 443 (HTTPS con SSL)
+- Locations: `/` (sitio principal), `/reloj/` (multi-sitio), `/admin/` (protegido con auth_basic)
+- Optimizaciones: `keepalive_timeout 30`, `absolute_redirect off`, compresión gzip
+
+**Seguridad**:
+- Certificados SSL autofirmados (RSA 2048 bits, 365 días)
+- HTTPS forzado con redirección 301
+- Autenticación básica en `/admin/` (usuario: admin)
+
+**Logs**: Monitorizados con `docker compose logs` y analizados con awk para métricas de URLs y códigos HTTP.
+
+
+#### Evidencias:
+
+**Parte 1 - Evidencias Mínimas**:
+
+**Fase 1: Instalación y configuración**
+1. Servicio Nginx activo → [Captura 2026-01-13 232312.png](evidencias/Captura%20de%20pantalla%202026-01-13%20232312.png) + [Captura 2026-01-14 000045.png](evidencias/Captura%20de%20pantalla%202026-01-14%20000045.png)
+2. Configuración cargada → [Captura 2026-01-14 000125.png](evidencias/Captura%20de%20pantalla%202026-01-14%20000125.png)
+3. Resolución de nombres → [Captura 2026-01-14 003832.png](evidencias/Captura%20de%20pantalla%202026-01-14%20003832.png)
+4. Contenido Web → [Captura 2026-01-14 003832.png](evidencias/Captura%20de%20pantalla%202026-01-14%20003832.png)
+
+**Fase 2: Transferencia SFTP**
+5. Conexión SFTP exitosa → [Captura 2026-01-14 005512.png](evidencias/Captura%20de%20pantalla%202026-01-14%20005512.png)
+6. Permisos de escritura → [Captura 2026-01-14 005835.png](evidencias/Captura%20de%20pantalla%202026-01-14%20005835.png) + [Captura 2026-01-14 005843.png](evidencias/Captura%20de%20pantalla%202026-01-14%20005843.png)
+
+**Fase 3: Infraestructura Docker**
+7. Contenedores activos → [Captura 2026-01-13 232312.png](evidencias/Captura%20de%20pantalla%202026-01-13%20232312.png)
+8. Persistencia → [Captura 2026-01-14 010601.png](evidencias/Captura%20de%20pantalla%202026-01-14%20010601.png) + [Captura 2026-01-14 010613.png](evidencias/Captura%20de%20pantalla%202026-01-14%20010613.png) + [Captura 2026-01-14 011724.png](evidencias/Captura%20de%20pantalla%202026-01-14%20011724.png)
+9. Despliegue multi-sitio → [Captura 2026-01-15 092903.png](evidencias/Captura%20de%20pantalla%202026-01-15%20092903.png)
+
+**Fase 4: Seguridad HTTPS**
+10. Cifrado SSL → [Captura 2026-01-14 122448.png](evidencias/Captura%20de%20pantalla%202026-01-14%20122448.png) + [Captura 2026-01-14 124121.png](evidencias/Captura%20de%20pantalla%202026-01-14%20124121.png) + [Captura 2026-01-14 124147.png](evidencias/Captura%20de%20pantalla%202026-01-14%20124147.png)
+11. Redirección forzada → [Captura 2026-01-14 170748.png](evidencias/Captura%20de%20pantalla%202026-01-14%20170748.png) + [Captura 2026-01-14 170817.png](evidencias/Captura%20de%20pantalla%202026-01-14%20170817.png)
+
+
+**Parte 2 - Evaluación RA2**:
+
+**a) Parámetros de administración**:
+- [a-01-grep-nginxconf.png](evidencias/a-01-grep-nginxconf.png) → Directivas en nginx.conf
+- [a-02-nginx-t.png](evidencias/a-02-nginx-t.png) → Validación de configuración
+- [a-03-reload.png](evidencias/a-03-reload.png) → Recarga de Nginx
+
+**b) Ampliación de funcionalidad (Gzip)**:
+- [b1-01-gzipconf.png](evidencias/b1-01-gzipconf.png) → Contenido de gzip.conf
+- [b1-02-compose-volume-gzip.png](evidencias/b1-02-compose-volume-gzip.png) → Montaje en docker-compose.yml
+- [b1-03-nginx-t.png](evidencias/b1-03-nginx-t.png) → Validación de configuración
+- [b1-04-curl-gzip.png](evidencias/b1-04-curl-gzip.png) → Comprobación de compresión
+
+**c) Sitios virtuales / multi-sitio**:
+- [c-01-root.png](evidencias/c-01-root.png) → Sitio principal (/)
+- [c-02-reloj.png](evidencias/c-02-reloj.png) → Sitio secundario (/reloj)
+- [c-03-defaultconf-inside.png](evidencias/c-03-defaultconf-inside.png) → Configuración default.conf
+
+**d) Autenticación y control de acceso**:
+- [d-01-admin-html.png](evidencias/d-01-admin-html.png) → Contenido /admin/
+- [d-02-defaultconf-auth.png](evidencias/d-02-defaultconf-auth.png) → Configuración auth_basic
+- [d-03-curl-401.png](evidencias/d-03-curl-401.png) → Acceso sin credenciales (401)
+- [d-04-curl-200.png](evidencias/d-04-curl-200.png) → Acceso con credenciales (200)
+
+**e) Certificados digitales**:
+- [e-01-ls-certs.png](evidencias/e-01-ls-certs.png) → Listado de certificados
+- [e-02-compose-certs.png](evidencias/e-02-compose-certs.png) → Montaje en docker-compose.yml
+- [e-03-defaultconf-ssl.png](evidencias/e-03-defaultconf-ssl.png) → Configuración SSL en default.conf
+
+**f) Comunicaciones seguras**:
+- [f-01-https.png](evidencias/f-01-https.png) → Navegación HTTPS
+- [f-02-301-network.png](evidencias/f-02-301-network.png) → Redirección 301 en DevTools
+
+**g) Documentación**: 
+- *(Esta sección con toda la documentación técnica)*
+
+**h) Ajustes para implantación de apps**:
+- [h-01-root.png](evidencias/h-01-root.png) → Aplicación principal
+- [h-02-reloj.png](evidencias/h-02-reloj.png) → Aplicación /reloj
+
+**i) Virtualización en despliegue**:
+- [i-01-compose-ps.png](evidencias/i-01-compose-ps.png) → Servicios activos
+
+**j) Logs: monitorización y análisis**:
+- [j-01-logs-follow.png](evidencias/j-01-logs-follow.png) → Monitorización en tiempo real
+- [j-02-metricas.png](evidencias/j-02-metricas.png) → Extracción de métricas
+
 
 ### h) Ajustes para implantacion de apps
-- Respuesta:
-- Evidencias:
-  - evidencias/h-01-root.png
-  - evidencias/h-02-reloj.png
+
+#### Respuesta:
+
+Al desplegar aplicaciones adicionales como /reloj, es fundamental ajustar las rutas de los recursos.
+
+**Problemas detectados y soluciones**:
+
+- Rutas Relativas: Si la aplicación en ```/reloj``` usa rutas absolutas para sus scripts (ej: ```/js/main.js```), el navegador los buscará en la raíz del servidor principal y fallará. Se debe asegurar que la aplicación use rutas relativas o configurar un alias correcto en Nginx.
+
+- Permisos SFTP: Al subir archivos vía SFTP, el propietario suele ser el usuario del servicio SSH. He configurado el contenedor SFTP y el volumen de forma que el usuario de Nginx tenga permisos de lectura sobre el contenido subido, evitando errores 403 (Forbidden).
+
+#### Evidencias:
+
+![h-01-root.png](evidencias/h-01-root.png)
+
+
+![h-02-reloj.png](evidencias/h-02-reloj.png)
+
 
 ### i) Virtualizacion en despliegue
-- Respuesta:
-- Evidencias:
-  - evidencias/i-01-compose-ps.png
+
+#### Respuesta:
+
+Desplegar en contenedores ofrece una capa de abstracción que facilita la portabilidad.
+
+**Diferencia operativa**:
+
+- Nativo: La configuración depende de las librerías del sistema operativo. Una actualización del sistema podría romper el servidor web.
+
+- Contenedor: El entorno de ejecución es idéntico en cualquier máquina. La configuración es "desechable" (si el contenedor falla, se recrea en segundos), mientras que la persistencia se garantiza mediante volúmenes externos que mantienen los datos de la web y los certificados a salvo.
+
+#### Evidencias:
+
+![i-01-compose-ps.png](evidencias/i-01-compose-ps.png)
+
 
 ### j) Logs: monitorizacion y analisis
-- Respuesta:
-- Evidencias:
-  - evidencias/j-01-logs-follow.png
-  - evidencias/j-02-metricas.png
+
+#### Respuesta:
+
+Por defecto, Nginx registra cada petición en ```/var/log/nginx/access.log``` y cada problema técnico en ```/var/log/nginx/error_log```.
+
+1. Generación de tráfico y simulación de errores: Para que el análisis de logs tenga sentido, primero he generado actividad de forma automatizada. He utilizado un bucle en la terminal para realizar 20 peticiones exitosas a la raíz y 10 peticiones a recursos que no existen. Esto permite "poblar" el archivo de log con códigos de estado 200 (OK) y 404 (Not Found).
+
+
+2. Monitorización en tiempo real: Utilizando el comando ``docker logs -f nginx-web``, puedo observar el comportamiento del servidor en vivo. Cada vez que alguien accede a la web, el contenedor imprime una línea con la IP, la fecha, el método HTTP, la URL y el código de respuesta. Esto es vital para detectar ataques o fallos en el momento en que ocurren.
+
+
+3. Análisis y extracción de métricas: Para consolidar la información y obtener estadísticas útiles sin leer miles de líneas, he ejecutado comandos de procesamiento de texto (awk, sort, uniq) dentro del contenedor. El archivo de log sigue un formato donde cada columna significa algo (la columna 7 es la URL, la 9 es el código de estado).
+   - **Métrica de URLs**: Permite ver cuáles son las páginas más visitadas.
+
+   - **Métrica de Códigos**: Permite ver de un vistazo si el servidor está dando muchos errores (4xx o 5xx).
+
+   - **Métrica de Errores 404**: Específicamente útil para detectar enlaces rotos o intentos de escaneo por parte de bots.
+
+#### Evidencias:
+
+![j-01-logs-follow.png](evidencias/j-01-logs-follow.png)
+
+
+![j-02-metricas.png](evidencias/j-02-metricas.png)
+
+
+**Comandos ejecutados**:
+
+````bash
+# Generar tráfico
+for i in {1..10}; do curl -s -I http://localhost:8080/ > /dev/null; done
+for i in {1..5}; do curl -s -I http://localhost:8080/error-test > /dev/null; done
+
+# Para ver los códigos de estado (200, 404, etc.)
+docker compose logs nginx | grep "HTTP/" | awk '{print $11}' | sort | uniq -c
+
+# Para ver las URLs solicitadas
+docker compose logs nginx | grep "HTTP/" | awk '{print $9}' | sort | uniq -c
+````
 
 ---
 
@@ -487,13 +676,13 @@ curl -I -k -u admin:'Admin1234!' https://localhost:8443/admin/
 - [✅] 11) Redireccion forzada (301)
 
 ### Parte 2 (RA2)
-- [ ] a) Parametros de administracion
-- [ ] b) Ampliacion de funcionalidad + modulo investigado
-- [ ] c) Sitios virtuales / multi-sitio
-- [ ] d) Autenticacion y control de acceso
-- [ ] e) Certificados digitales
-- [ ] f) Comunicaciones seguras
-- [ ] g) Documentacion
-- [ ] h) Ajustes para implantacion de apps
-- [ ] i) Virtualizacion en despliegue
-- [ ] j) Logs: monitorizacion y analisis
+- [✅] a) Parametros de administracion
+- [✅] b) Ampliacion de funcionalidad + modulo investigado
+- [✅] c) Sitios virtuales / multi-sitio
+- [✅] d) Autenticacion y control de acceso
+- [✅] e) Certificados digitales
+- [✅] f) Comunicaciones seguras
+- [✅] g) Documentacion
+- [✅] h) Ajustes para implantacion de apps
+- [✅] i) Virtualizacion en despliegue
+- [✅] j) Logs: monitorizacion y analisis
